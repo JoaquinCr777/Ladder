@@ -1,0 +1,238 @@
+/**
+ * ============================================================================
+ * LADDER LOGIC TRAINER — CORE & EXTENDED EDITOR ENGINE (AMPLIADO)
+ * ============================================================================
+ * Este archivo unifica la gestión del estado, la delegación de eventos globales,
+ * y la funcionalidad avanzada de Copiar (Ctrl+C) y Pegar (Ctrl+V) de componentes.
+ */
+
+// 1. EXTENSIÓN Y CONTROL DEL ESTADO GLOBAL
+window.state = window.state || {};
+Object.assign(window.state, {
+  mode: 'EDITOR',             // Modos: 'EDITOR' o 'SIMULATOR'
+  programName: 'SIN_NOMBRE',
+  rungs: [],                  // Estructura de datos de los peldaños
+  selectedComponent: null,    // Almacena el nodo del DOM del componente seleccionado
+  clipboard: null             // Portapapeles dinámico para copiar/pegar componentes
+});
+
+// 2. CONFIGURACIÓN DEL ENGINE AL CARGAR EL DOM
+document.addEventListener('DOMContentLoaded', () => {
+  const viewport = document.getElementById('canvas-viewport');
+  const toolbar = document.querySelector('.toolbar');
+  const statusSelected = document.getElementById('status-selected');
+
+  if (!viewport) {
+    console.error("Error: No se encontró el contenedor '#canvas-viewport'.");
+    return;
+  }
+
+  // Asegurar que el lienzo pueda recibir eventos del teclado
+  if (!viewport.hasAttribute('tabindex')) {
+    viewport.setAttribute('tabindex', '0');
+  }
+
+  /**
+   * ==========================================================================
+   * SECCIÓN A: OPTIMIZACIÓN POR DELEGACIÓN DE EVENTOS (TOOLBAR)
+   * ==========================================================================
+   * Reduce el consumo de memoria manejando los clicks desde el contenedor padre.
+   */
+  if (toolbar) {
+    toolbar.addEventListener('click', (event) => {
+      const targetButton = event.target.closest('.component-btn');
+      if (!targetButton || window.state.mode !== 'EDITOR') return;
+
+      const componentType = targetButton.dataset.component;
+      
+      // Estructura base para componentes nuevos desde la barra de herramientas
+      const newComponentData = {
+        type: componentType,
+        address: '',
+        name: ''
+      };
+      
+      insertComponentInDOM(newComponentData);
+    });
+  }
+
+  /**
+   * ==========================================================================
+   * SECCIÓN B: ATAJOS DE TECLADO (COPIAR Y PEGAR — CTRL+C / CTRL+V)
+   * ==========================================================================
+   */
+  viewport.addEventListener('keydown', (event) => {
+    // Bloquear acciones si el simulador está en ejecución (Modo RUN)
+    if (window.state.mode !== 'EDITOR') return;
+
+    const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+    const pressedKey = event.key.toLowerCase();
+
+    // COMANDO COPIAR: Ctrl + C
+    if (isCtrlOrCmd && pressedKey === 'c') {
+      if (window.state.selectedComponent) {
+        event.preventDefault();
+
+        const selectedEl = window.state.selectedComponent;
+        
+        // Serialización del componente seleccionado (Soporta datos analógicos y discretos)
+        window.state.clipboard = {
+          type: selectedEl.dataset.component,
+          address: selectedEl.dataset.address || '',
+          name: selectedEl.dataset.name || '',
+          // Espacio de extensión para parches analógicos (parámetros como límites, constantes, etc.)
+          meta: selectedEl.dataset.meta ? JSON.parse(selectedEl.dataset.meta) : null 
+        };
+
+        if (statusSelected) {
+          statusSelected.textContent = `Copiado al portapapeles: ${window.state.clipboard.type} [${window.state.clipboard.address || 'Sin Tag'}]`;
+        }
+      }
+    }
+
+    // COMANDO PEGAR: Ctrl + V
+    if (isCtrlOrCmd && pressedKey === 'v') {
+      if (window.state.clipboard) {
+        event.preventDefault();
+        // Insertar clon del objeto almacenado en el portapapeles
+        insertComponentInDOM(window.state.clipboard);
+      }
+    }
+  });
+});
+
+/**
+ * ============================================================================
+ * SECCIÓN C: MOTOR DE INSERCIÓN Y RENDERIZADO EN EL LIENZO LADDER
+ * ============================================================================
+ * Despliega dinámicamente el componente en el DOM y refresca el estado del PLC.
+ * * @param {Object} componentData - Estructura de datos del componente a renderizar.
+ */
+function insertComponentInDOM(componentData) {
+  let activeRungBody = null;
+
+  // 1. Localizar el peldaño (Rung) de destino
+  if (window.state.selectedComponent) {
+    activeRungBody = window.state.selectedComponent.closest('.rung__body');
+  } else {
+    const allRungs = document.querySelectorAll('.rung__body');
+    if (allRungs.length > 0) {
+      activeRungBody = allRungs[allRungs.length - 1]; // Por defecto se asigna al último rung
+    }
+  }
+
+  if (!activeRungBody) {
+    console.warn("Operación cancelada: No se detectaron Rungs activos en el lienzo.");
+    return;
+  }
+
+  // Limpiar el texto de sugerencia inicial (Placeholder) si existe
+  const hintPlaceholder = activeRungBody.querySelector('.rung__hint');
+  if (hintPlaceholder) {
+    hintPlaceholder.remove();
+  }
+
+  // 2. Construcción del Nodo de la Casilla Ladder (Elemento HTML)
+  const newCell = document.createElement('div');
+  newCell.classList.add('ladder-cell');
+  newCell.dataset.component = componentData.type;
+  newCell.dataset.address = componentData.address;
+  newCell.dataset.name = componentData.name;
+  
+  if (componentData.meta) {
+    newCell.dataset.meta = JSON.stringify(componentData.meta);
+  }
+  
+  newCell.setAttribute('tabindex', '0'); // Permitir foco individual por accesibilidad y teclado
+
+  // 3. Inyección del Gráfico Vectorial (SVG) correspondiente
+  const originalTemplateButton = document.querySelector(`[data-component="${componentData.type}"]`);
+  if (originalTemplateButton) {
+    const svgIcon = originalTemplateButton.querySelector('svg');
+    if (svgIcon) {
+      newCell.appendChild(svgIcon.cloneNode(true));
+    } else {
+      // Manejo alternativo para bloques analógicos o de temporización basados en texto plano (TON, CTU, CMP)
+      const blockLabelTop = originalTemplateButton.querySelector('.block-label-top');
+      const componentLabel = originalTemplateButton.querySelector('.component-label');
+      
+      if (blockLabelTop) {
+        const topSpan = blockLabelTop.cloneNode(true);
+        // Respetar el color distintivo del parche analógico (#1a9eb5) vía CSS o estilo heredado
+        newCell.appendChild(topSpan);
+      }
+      if (componentLabel) {
+        newCell.appendChild(componentLabel.cloneNode(true));
+      }
+    }
+  }
+
+  // 4. Creación de la Etiqueta de Direccionamiento (Tag / Operando)
+  const addressTag = document.createElement('span');
+  addressTag.classList.add('cell-address-label');
+  addressTag.textContent = componentData.address || '—';
+  newCell.appendChild(addressTag);
+
+  // 5. Enlace del Evento de Selección Exclusiva de la Casilla
+  newCell.addEventListener('click', (event) => {
+    event.stopPropagation();
+    
+    // Limpiar clases de selección previas en todo el canvas
+    document.querySelectorAll('.ladder-cell--selected').forEach(cell => {
+      cell.classList.remove('ladder-cell--selected');
+    });
+
+    newCell.classList.add('ladder-cell--selected');
+    window.state.selectedComponent = newCell;
+
+    const statusSelected = document.getElementById('status-selected');
+    if (statusSelected) {
+      statusSelected.textContent = `Seleccionado: ${componentData.type} [${componentData.address || 'Sin Dirección'}]`;
+    }
+  });
+
+  // 6. Inserción Estratégica en el DOM (Posicionamiento en serie)
+  if (window.state.selectedComponent && window.state.selectedComponent.closest('.rung__body') === activeRungBody) {
+    // Si hay un elemento seleccionado en el mismo rung, colocar el nuevo componente inmediatamente después
+    window.state.selectedComponent.after(newCell);
+  } else {
+    // Si no, añadir al final de la línea lógica del peldaño
+    activeRungBody.appendChild(newCell);
+  }
+
+  // 7. SINCRONIZACIÓN CON EL MOTOR DE SIMULACIÓN DEL PLC
+  // Invoca la función encargada de reconstruir la matriz lógica en memoria a partir de los nodos del DOM
+  if (typeof window.updateInternalStateFromDOM === 'function') {
+    window.updateInternalStateFromDOM();
+  } else if (typeof window.saveProgramState === 'function') {
+    window.saveProgramState();
+  }
+}
+/* Resaltado estético del componente seleccionado o pegado dentro del editor */
+.ladder-cell {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 64px;
+  border: 1px dashed transparent;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.ladder-cell:focus,
+.ladder-cell--selected {
+  outline: none;
+  background-color: rgba(26, 158, 181, 0.15); /* Tinte azul analógico suave */
+  border: 1px solid #1a9eb5;
+  border-radius: 4px;
+}
+
+.cell-address-label {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-muted, #666);
+  margin-top: 4px;
+}

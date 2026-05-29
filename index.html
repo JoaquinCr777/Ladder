@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ladder Logic Trainer (Mejorado)</title>
+  <style>
+    /* ========================================================================
+       ESTILOS BASE Y VARIABLES (Simulación de layout.css y components.css)
+       ======================================================================== */
+    :root {
+      --bg-color: #f5f6fa;
+      --panel-bg: #ffffff;
+      --border-color: #dcdde1;
+      --text-color: #2f3640;
+      --text-muted: #718093;
+      --analog-color: #1a9eb5;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Barra Superior */
+    .titlebar {
+      height: 48px;
+      background-color: #2f3542;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+    }
+    .titlebar__brand { font-weight: bold; }
+    .titlebar__menu button, .ctrl-btn {
+      background: #57606f;
+      border: none;
+      color: white;
+      padding: 6px 12px;
+      margin: 0 4px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .ctrl-btn--run { background-color: #2ed573; }
+    .ctrl-btn--stop { background-color: #ff4757; }
+
+    /* Estructura Principal */
+    .app-shell {
+      display: flex;
+      flex: 1;
+      height: calc(100vh - 72px);
+    }
+
+    /* Panel Izquierdo (Toolbar) */
+    .toolbar {
+      width: 260px;
+      background-color: var(--panel-bg);
+      border-right: 1px solid var(--border-color);
+      overflow-y: auto;
+      padding: 12px;
+    }
+    .toolbar__group-title {
+      font-size: 14px;
+      text-transform: uppercase;
+      margin: 16px 0 8px 0;
+      border-bottom: 2px solid var(--border-color);
+      padding-bottom: 4px;
+    }
+    .component-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+    .component-btn {
+      background: var(--bg-color);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 8px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-size: 11px;
+    }
+    .component-icon { width: 40px; height: 24px; }
+
+    /* Área Central (Canvas) */
+    .canvas-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background-color: #f1f2f6;
+    }
+    .canvas-toolbar {
+      height: 36px;
+      background: var(--panel-bg);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      font-size: 13px;
+    }
+    .canvas-viewport {
+      flex: 1;
+      overflow: auto;
+      padding: 20px;
+      outline: none;
+    }
+    .canvas-content {
+      background: white;
+      min-height: 100%;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      padding: 20px;
+    }
+
+    /* Peldaños (Rungs) y Casillas (Cells) */
+    .rung {
+      display: flex;
+      align-items: center;
+      margin-bottom: 20px;
+      position: relative;
+    }
+    .rung__rail {
+      width: 4px;
+      height: 80px;
+      background-color: #2f3542;
+    }
+    .rung__body {
+      flex: 1;
+      height: 80px;
+      border-bottom: 2px solid #57606f;
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 10px;
+    }
+    .rung__hint { color: var(--text-muted); font-size: 13px; }
+
+    /* ESTILO CLAVE MODIFICADO PARA LA SELECCIÓN Y COPIADO */
+    .ladder-cell {
+      position: relative;
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 80px;
+      height: 70px;
+      border: 1px dashed transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background: #fafafa;
+      border-radius: 4px;
+    }
+    .ladder-cell:focus,
+    .ladder-cell--selected {
+      outline: none;
+      background-color: rgba(26, 158, 181, 0.15);
+      border: 1px solid var(--analog-color);
+    }
+    .cell-address-label {
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Barra de Estado Inferior */
+    .statusbar {
+      height: 24px;
+      background-color: #2f3542;
+      color: #a4b0be;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="titlebar" role="banner">
+    <div class="titlebar__brand">
+      <span class="titlebar__name">Ladder Logic <strong>Trainer</strong></span>
+    </div>
+    <div class="titlebar__controls">
+      <button class="ctrl-btn ctrl-btn--run">RUN</button>
+      <button class="ctrl-btn ctrl-btn--stop">STOP</button>
+    </div>
+  </header>
+
+  <div class="app-shell" role="main">
+    <aside class="toolbar">
+      <section class="toolbar__group">
+        <h2 class="toolbar__group-title">Contactos</h2>
+        <div class="component-grid">
+          <button class="component-btn" data-component="contact-no">
+            <svg class="component-icon" viewBox="0 0 48 32"><line x1="0" y1="16" x2="14" y2="16" stroke="currentColor" stroke-width="2"/><line x1="14" y1="6" x2="14" y2="26" stroke="currentColor" stroke-width="2"/><line x1="34" y1="6" x2="34" y2="26" stroke="currentColor" stroke-width="2"/><line x1="34" y1="16" x2="48" y2="16" stroke="currentColor" stroke-width="2"/></svg>
+            <span class="component-label">NO</span>
+          </button>
+          <button class="component-btn" data-component="contact-nc">
+            <svg class="component-icon" viewBox="0 0 48 32"><line x1="0" y1="16" x2="14" y2="16" stroke="currentColor" stroke-width="2"/><line x1="14" y1="6" x2="14" y2="26" stroke="currentColor" stroke-width="2"/><line x1="34" y1="6" x2="34" y2="26" stroke="currentColor" stroke-width="2"/><line x1="34" y1="16" x2="48" y2="16" stroke="currentColor" stroke-width="2"/><line x1="14" y1="6" x2="34" y2="26" stroke="currentColor" stroke-width="1.5"/></svg>
+            <span class="component-label">NC</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="toolbar__group">
+        <h2 class="toolbar__group-title" style="color: var(--analog-color)">Analógico</h2>
+        <div class="component-grid">
+          <button class="component-btn" data-component="cmp-gt">
+            <span class="block-label-top" style="color: var(--analog-color); font-weight: bold;">CMP</span>
+            <span class="component-label">&gt;</span>
+          </button>
+          <button class="component-btn" data-component="math-add">
+            <span class="block-label-top" style="color: var(--analog-color); font-weight: bold;">ADD</span>
+            <span class="component-label">IN1+IN2</span>
+          </button>
+        </div>
+      </section>
+    </aside>
+
+    <section class="canvas-area">
+      <div class="canvas-toolbar">
+        <div><span>PROGRAMA_ENTRENADOR</span></div>
+      </div>
+      <div class="canvas-viewport" id="canvas-viewport">
+        <div class="canvas-content" id="canvas-content">
+          <div class="rung">
+            <div class="rung__rail"></div>
+            <div class="rung__body">
+              <span class="rung__hint">Haz click en un componente o presiona Ctrl+V para pegar uno copiado.</span>
+            </div>
+            <div class="rung__rail"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer class="statusbar">
+    <span id="status-selected">Ningún componente seleccionado. Tip: Usa Ctrl+C y Ctrl+V en el lienzo.</span>
+  </footer>
+
+  <script>
+    // Inicialización segura del estado
+    window.state = {
+      mode: 'EDITOR',
+      selectedComponent: null,
+      clipboard: null // Portapapeles
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const viewport = document.getElementById('canvas-viewport');
+      const toolbar = document.querySelector('.toolbar');
+      const statusSelected = document.getElementById('status-selected');
+
+      // 1. Manejo de Clicks en la Barra de Herramientas (Delegación)
+      if (toolbar) {
+        toolbar.addEventListener('click', (event) => {
+          const targetButton = event.target.closest('.component-btn');
+          if (!targetButton || window.state.mode !== 'EDITOR') return;
+
+          const componentType = targetButton.dataset.component;
+          insertComponentInDOM({
+            type: componentType,
+            address: prompt("Asigna una dirección (ej: I0.0, Q0.1, AM0.0):") || '—',
+            name: ''
+          });
+        });
+      }
+
+      // 2. Eventos de Teclado del Lienzo (Copiar y Pegar)
+      if (viewport) {
+        viewport.addEventListener('keydown', (event) => {
+          if (window.state.mode !== 'EDITOR') return;
+
+          const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+          const pressedKey = event.key.toLowerCase();
+
+          // CONTROL + C (Copiar)
+          if (isCtrlOrCmd && pressedKey === 'c') {
+            if (window.state.selectedComponent) {
+              event.preventDefault();
+              const selectedEl = window.state.selectedComponent;
+
+              window.state.clipboard = {
+                type: selectedEl.dataset.component,
+                address: selectedEl.dataset.address || '—',
+                name: selectedEl.dataset.name || ''
+              };
+
+              if (statusSelected) {
+                statusSelected.textContent = `Copió con éxito: ${window.state.clipboard.type} [${window.state.clipboard.address}]`;
+              }
+            }
+          }
+
+          // CONTROL + V (Pegar)
+          if (isCtrlOrCmd && pressedKey === 'v') {
+            if (window.state.clipboard) {
+              event.preventDefault();
+              insertComponentInDOM(window.state.clipboard);
+            }
+          }
+        });
+      }
+    });
+
+    // 3. Función de Renderizado e Inserción Dinámica
+    function insertComponentInDOM(componentData) {
+      const allRungs = document.querySelectorAll('.rung__body');
+      if (allRungs.length === 0) return;
+      
+      // Tomar el peldaño activo o el último por defecto
+      let activeRungBody = window.state.selectedComponent ? 
+                           window.state.selectedComponent.closest('.rung__body') : 
+                           allRungs[allRungs.length - 1];
+
+      // Eliminar el mensaje de ayuda/hint inicial
+      const hint = activeRungBody.querySelector('.rung__hint');
+      if (hint) hint.remove();
+
+      // Crear caja contenedora del componente en la cuadrícula Ladder
+      const newCell = document.createElement('div');
+      newCell.classList.add('ladder-cell');
+      newCell.dataset.component = componentData.type;
+      newCell.dataset.address = componentData.address;
+      newCell.dataset.name = componentData.name;
+
+      // Buscar gráfico original para clonarlo dentro de la casilla
+      const originalBtn = document.querySelector(`[data-component="${componentData.type}"]`);
+      if (originalBtn) {
+        const svg = originalBtn.querySelector('svg');
+        if (svg) {
+          newCell.appendChild(svg.cloneNode(true));
+        } else {
+          // Si es un bloque analógico (es una etiqueta de texto en vez de SVG)
+          const topLabel = originalBtn.querySelector('.block-label-top');
+          const compLabel = originalBtn.querySelector('.component-label');
+          if (topLabel) newCell.appendChild(topLabel.cloneNode(true));
+          if (compLabel) newCell.appendChild(compLabel.cloneNode(true));
+        }
+      }
+
+      // Inyectar etiqueta de dirección asignada
+      const addressSpan = document.createElement('span');
+      addressSpan.classList.add('cell-address-label');
+      addressSpan.textContent = componentData.address;
+      newCell.appendChild(addressSpan);
+
+      // Evento de Selección al hacer click
+      newCell.addEventListener('click', (event) => {
+        event.stopPropagation();
+        document.querySelectorAll('.ladder-cell--selected').forEach(c => c.classList.remove('ladder-cell--selected'));
+        
+        newCell.classList.add('ladder-cell--selected');
+        window.state.selectedComponent = newCell;
+        
+        document.getElementById('status-selected').textContent = `Seleccionado: ${componentData.type} [${componentData.address}]`;
+      });
+
+      // Posicionamiento lógico: si hay uno seleccionado, pegarlo al lado; si no, al final
+      if (window.state.selectedComponent && window.state.selectedComponent.closest('.rung__body') === activeRungBody) {
+        window.state.selectedComponent.after(newCell);
+      } else {
+        activeRungBody.appendChild(newCell);
+      }
+    }
+  </script>
+</body>
+</html>
